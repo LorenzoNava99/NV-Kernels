@@ -206,7 +206,14 @@ jobs:
           export DEBEMAIL="noreply@nvidia.com"
 
           # Build all packages: image, headers, libc-dev
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) bindeb-pkg
+          echo "=== Running make bindeb-pkg ==="
+          if ! make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) bindeb-pkg 2>&1 | tee build-debpkg.log; then
+            echo "=== Debian package build FAILED - Last 100 lines of log: ==="
+            tail -100 build-debpkg.log
+            echo "=== Grep for errors: ==="
+            grep -i "error\|fatal\|cannot\|missing" build-debpkg.log | tail -50 || true
+            exit 1
+          fi
 
           echo "=== Package creation complete ==="
 
