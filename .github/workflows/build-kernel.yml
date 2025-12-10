@@ -270,30 +270,55 @@ jobs:
       - name: Collect kernel packages
         if: github.event.inputs.build_type != 'quick-test'
         run: |
-          set -x  # Enable command tracing for debugging
+          set -ex  # Enable command tracing AND exit on error
 
           echo "=== Collecting .deb packages for upload ==="
           echo "Current directory: $(pwd)"
           echo "GITHUB_WORKSPACE: $GITHUB_WORKSPACE"
-          echo "Parent directory: $(dirname "$GITHUB_WORKSPACE")"
+
+          # Use absolute paths to avoid any path confusion
+          WORKSPACE_ABS="$(realpath "$GITHUB_WORKSPACE")"
+          PARENT_ABS="$(dirname "$WORKSPACE_ABS")"
+          WORK_ROOT="/home/runner/work"
+
+          echo "WORKSPACE_ABS: $WORKSPACE_ABS"
+          echo "PARENT_ABS: $PARENT_ABS"
+          echo "WORK_ROOT: $WORK_ROOT"
 
           mkdir -p packages
 
           echo ""
-          echo "=== Finding .deb files with find command ==="
-          find .. -maxdepth 1 -name "*.deb" -ls 2>/dev/null || echo "No .deb files found"
+          echo "=== FULL DEBUG: Finding ALL .deb files on runner ==="
+
+          echo "1. Contents of parent directory ($PARENT_ABS):"
+          ls -la "$PARENT_ABS" 2>/dev/null || echo "Cannot list $PARENT_ABS"
 
           echo ""
-          echo "=== Copying packages using find -exec cp ==="
-
-          # Use find -exec cp (most robust method)
-          find .. -maxdepth 1 -name "*.deb" -exec cp -v {} packages/ \;
+          echo "2. Searching for .deb in parent ($PARENT_ABS):"
+          find "$PARENT_ABS" -maxdepth 1 -name "*.deb" -ls 2>/dev/null || echo "None in parent"
 
           echo ""
-          echo "=== Copy complete ==="
+          echo "3. Searching for .deb in work root ($WORK_ROOT):"
+          find "$WORK_ROOT" -maxdepth 3 -name "*.deb" -ls 2>/dev/null || echo "None in work root"
 
           echo ""
-          echo "=== Packages collected ==="
+          echo "4. Searching ALL of /home/runner for .deb:"
+          find /home/runner -name "*.deb" -ls 2>/dev/null | head -50 || echo "None found anywhere"
+
+          echo ""
+          echo "=== Copying from all found locations ==="
+
+          # Copy from parent directory
+          find "$PARENT_ABS" -maxdepth 1 -name "*.deb" -exec cp -v {} packages/ \; 2>/dev/null || true
+
+          # Copy from work root (in case files ended up there)
+          find "$WORK_ROOT" -maxdepth 3 -name "linux-*.deb" -exec cp -v {} packages/ \; 2>/dev/null || true
+
+          # Copy using relative path as fallback
+          find .. -maxdepth 1 -name "*.deb" -exec cp -v {} packages/ \; 2>/dev/null || true
+
+          echo ""
+          echo "=== Packages directory after copy ==="
           ls -la packages/ || echo "packages directory is empty or doesn't exist"
 
           # Count packages
@@ -302,16 +327,21 @@ jobs:
 
           # Verify we have packages
           if [ "$PKG_COUNT" -eq 0 ]; then
-            echo "ERROR: No packages found in packages/ directory!"
             echo ""
-            echo "Debug: Searching for .deb files in various locations..."
-            echo "From parent directory with absolute path:"
-            PARENT_DIR="$(dirname "$GITHUB_WORKSPACE")"
-            find "$PARENT_DIR" -maxdepth 1 -name "*.deb" -ls 2>/dev/null || echo "None in $PARENT_DIR"
-            echo "From /home/runner (first 30):"
-            find /home/runner -name "*.deb" -ls 2>/dev/null | head -30 || echo "None in /home/runner"
-            echo "Disk space:"
+            echo "=== ERROR: No packages found! ==="
+            echo ""
+            echo "Full environment:"
+            env | grep -E "GITHUB|HOME|PWD|PATH" | sort
+            echo ""
+            echo "Current directory tree:"
+            ls -laR . 2>/dev/null | head -100
+            echo ""
+            echo "All files named linux-* anywhere:"
+            find /home/runner -name "linux-*" -ls 2>/dev/null | head -50 || true
+            echo ""
+            echo "Disk usage:"
             df -h
+            du -sh /home/runner/* 2>/dev/null | sort -h || true
             exit 1
           fi
 
