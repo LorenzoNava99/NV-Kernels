@@ -267,13 +267,26 @@ jobs:
           echo "=== DTB files ==="
           find arch/arm64/boot/dts/nvidia/ -name "*.dtb" -ls 2>/dev/null | head -10 || echo "No NVIDIA DTBs found"
 
+      - name: Collect kernel packages
+        if: github.event.inputs.build_type != 'quick-test'
+        run: |
+          echo "=== Collecting .deb packages for upload ==="
+          mkdir -p packages
+          cp ../*.deb packages/ 2>/dev/null || true
+          echo "Packages collected:"
+          ls -la packages/
+          if [ ! "$(ls -A packages/)" ]; then
+            echo "ERROR: No packages found to upload!"
+            find .. -maxdepth 1 -name "*.deb" -ls
+            exit 1
+          fi
+
       - name: Upload kernel packages
         if: github.event.inputs.build_type != 'quick-test'
         uses: actions/upload-artifact@v4
         with:
           name: kernel-packages-arm64
-          path: |
-            ../*.deb
+          path: packages/*.deb
           retention-days: 30
 
       - name: Upload kernel image
@@ -297,7 +310,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Generated Packages" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          for pkg in ../*.deb; do
+          for pkg in packages/*.deb; do
             if [[ -f "$pkg" ]]; then
               NAME=$(basename "$pkg")
               SIZE=$(du -h "$pkg" | cut -f1)
