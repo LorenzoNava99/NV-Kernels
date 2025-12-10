@@ -271,15 +271,30 @@ jobs:
         if: github.event.inputs.build_type != 'quick-test'
         run: |
           echo "=== Collecting .deb packages for upload ==="
+          echo "Current directory: $(pwd)"
+          echo "Parent directory contents:"
+          ls -la .. | head -20
+
           mkdir -p packages
-          cp ../*.deb packages/ 2>/dev/null || true
-          echo "Packages collected:"
+
+          # Use find instead of glob expansion for reliability
+          echo "=== Copying .deb files ==="
+          find .. -maxdepth 1 -name "*.deb" -exec cp -v {} packages/ \;
+
+          echo ""
+          echo "=== Packages collected ==="
           ls -la packages/
-          if [ ! "$(ls -A packages/)" ]; then
-            echo "ERROR: No packages found to upload!"
-            find .. -maxdepth 1 -name "*.deb" -ls
+
+          # Verify we have packages
+          if [ -z "$(ls -A packages/ 2>/dev/null)" ]; then
+            echo "ERROR: No packages found in packages/ directory!"
+            echo "Searching for .deb files..."
+            find .. -maxdepth 2 -name "*.deb" -ls
+            find . -name "*.deb" -ls 2>/dev/null || true
             exit 1
           fi
+
+          echo "✓ Package collection successful"
 
       - name: Upload kernel packages
         if: github.event.inputs.build_type != 'quick-test'
