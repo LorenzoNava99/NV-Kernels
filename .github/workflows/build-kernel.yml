@@ -277,25 +277,20 @@ jobs:
           mkdir -p packages
 
           echo ""
-          echo "=== Finding and copying .deb files using find ==="
+          echo "=== Copying packages using simple for loop ==="
 
-          # Use find to locate .deb files in parent directory and copy them
-          # This approach works reliably in GitHub Actions where glob may not
-          cd ..
-          echo "Now in: $(pwd)"
-          echo "Contents:"
-          ls -la | head -30
+          # Use the same pattern that works in "Verify and list built artifacts"
+          COPY_COUNT=0
+          for pkg in ../*.deb; do
+            if [[ -f "$pkg" ]]; then
+              echo "Copying: $pkg"
+              cp -v "$pkg" packages/
+              COPY_COUNT=$((COPY_COUNT + 1))
+            fi
+          done
 
           echo ""
-          echo "=== Copying packages ==="
-          COPY_COUNT=0
-          while IFS= read -r -d '' debfile; do
-            echo "Found: $debfile"
-            cp -v "$debfile" "$GITHUB_WORKSPACE/packages/"
-            COPY_COUNT=$((COPY_COUNT + 1))
-          done < <(find . -maxdepth 1 -name "*.deb" -print0)
-
-          cd "$GITHUB_WORKSPACE"
+          echo "Copied $COPY_COUNT packages"
 
           echo ""
           echo "=== Packages collected ==="
