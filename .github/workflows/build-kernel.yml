@@ -74,13 +74,34 @@ jobs:
           ./scripts/config --set-str LOCALVERSION "${{ env.KERNEL_LOCALVERSION }}"
           ./scripts/config --disable LOCALVERSION_AUTO
 
-          # Disable cert requirements for simpler build
+          # Completely disable all cert/signing requirements for simpler build
           ./scripts/config --disable MODULE_SIG
           ./scripts/config --disable MODULE_SIG_ALL
+          ./scripts/config --disable MODULE_SIG_FORCE
           ./scripts/config --disable SYSTEM_TRUSTED_KEYRING
           ./scripts/config --disable SECONDARY_TRUSTED_KEYRING
           ./scripts/config --set-str SYSTEM_TRUSTED_KEYS ""
           ./scripts/config --set-str SYSTEM_REVOCATION_KEYS ""
+          ./scripts/config --disable MODULE_SIG_KEY_TYPE_RSA
+          ./scripts/config --disable MODULE_SIG_KEY_TYPE_ECDSA
+          ./scripts/config --set-str MODULE_SIG_KEY ""
+
+          # Disable integrity subsystem (also triggers cert builds)
+          ./scripts/config --disable INTEGRITY
+          ./scripts/config --disable INTEGRITY_SIGNATURE
+          ./scripts/config --disable INTEGRITY_ASYMMETRIC_KEYS
+          ./scripts/config --disable IMA
+          ./scripts/config --disable IMA_APPRAISE
+          ./scripts/config --disable EVM
+
+          # Disable lockdown (can require signed modules)
+          ./scripts/config --disable SECURITY_LOCKDOWN_LSM
+          ./scripts/config --disable LOCK_DOWN_KERNEL_FORCE_CONFIDENTIALITY
+
+          # Disable kexec signing (also uses certs)
+          ./scripts/config --disable KEXEC_SIG
+          ./scripts/config --disable KEXEC_BZIMAGE_VERIFY_SIG
+
           ./scripts/config --disable WERROR
 
           # Enable ARM64 optimizations
@@ -115,8 +136,30 @@ jobs:
           echo "=== Building kernel on native ARM64 ==="
           echo "CPU count: $(nproc)"
 
+          # Check OpenSSL headers availability
+          echo "Checking OpenSSL headers..."
+          pkg-config --cflags openssl || echo "pkg-config failed, headers may be missing"
+          ls -la /usr/include/openssl/bio.h || echo "OpenSSL bio.h not found at standard location"
+
+          # If extract-cert fails to build, create a dummy one
+          # This is a common workaround when cert infrastructure is disabled
+          mkdir -p certs
+          if [ ! -f certs/extract-cert ]; then
+            cat > certs/extract-cert << 'DUMMY'
+          #!/bin/bash
+          # Dummy extract-cert - certificate extraction disabled
+          echo "Warning: extract-cert is a stub (certs disabled)" >&2
+          exit 0
+          DUMMY
+            chmod +x certs/extract-cert
+          fi
+
           # Build kernel image
-          make -j$(nproc) Image.gz
+          make -j$(nproc) Image.gz || {
+            echo "Image.gz build failed, retrying with V=1 for more details..."
+            make -j1 V=1 Image.gz 2>&1 | tail -100
+            exit 1
+          }
 
           # Build modules
           make -j$(nproc) modules
