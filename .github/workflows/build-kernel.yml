@@ -205,6 +205,9 @@ jobs:
           export EMAIL="noreply@nvidia.com"
           export DEBEMAIL="noreply@nvidia.com"
 
+          # Create packages directory NOW
+          mkdir -p packages
+
           # Build all packages: image, headers, libc-dev
           echo "=== Running make bindeb-pkg ==="
           if ! make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) bindeb-pkg 2>&1 | tee build-debpkg.log; then
@@ -216,6 +219,22 @@ jobs:
           fi
 
           echo "=== Package creation complete ==="
+
+          # IMMEDIATELY copy packages to known location (before any step boundary)
+          echo "=== Copying packages to packages/ directory ==="
+          echo "Current directory: $(pwd)"
+          echo "Looking for .deb files in parent:"
+          ls -la ../*.deb 2>/dev/null || echo "No .deb via glob"
+
+          # Copy using multiple methods to ensure success
+          for f in ../*.deb; do
+            [ -f "$f" ] && cp -v "$f" packages/ && echo "Copied: $f"
+          done
+
+          # Verify packages were copied
+          echo "=== Packages in packages/ directory ==="
+          ls -la packages/
+          echo "Package count: $(ls -1 packages/*.deb 2>/dev/null | wc -l)"
 
       - name: Verify and list built artifacts
         if: github.event.inputs.build_type != 'quick-test'
@@ -270,83 +289,34 @@ jobs:
       - name: Collect kernel packages
         if: github.event.inputs.build_type != 'quick-test'
         run: |
-          set -ex  # Enable command tracing AND exit on error
+          echo "=== Verifying packages were collected ==="
 
-          echo "=== Collecting .deb packages for upload ==="
-          echo "Current directory: $(pwd)"
-          echo "GITHUB_WORKSPACE: $GITHUB_WORKSPACE"
-
-          # Use absolute paths to avoid any path confusion
-          WORKSPACE_ABS="$(realpath "$GITHUB_WORKSPACE")"
-          PARENT_ABS="$(dirname "$WORKSPACE_ABS")"
-          WORK_ROOT="/home/runner/work"
-
-          echo "WORKSPACE_ABS: $WORKSPACE_ABS"
-          echo "PARENT_ABS: $PARENT_ABS"
-          echo "WORK_ROOT: $WORK_ROOT"
-
-          mkdir -p packages
-
-          echo ""
-          echo "=== FULL DEBUG: Finding ALL .deb files on runner ==="
-
-          echo "1. Contents of parent directory ($PARENT_ABS):"
-          ls -la "$PARENT_ABS" 2>/dev/null || echo "Cannot list $PARENT_ABS"
-
-          echo ""
-          echo "2. Searching for .deb in parent ($PARENT_ABS):"
-          find "$PARENT_ABS" -maxdepth 1 -name "*.deb" -ls 2>/dev/null || echo "None in parent"
-
-          echo ""
-          echo "3. Searching for .deb in work root ($WORK_ROOT):"
-          find "$WORK_ROOT" -maxdepth 3 -name "*.deb" -ls 2>/dev/null || echo "None in work root"
-
-          echo ""
-          echo "4. Searching ALL of /home/runner for .deb:"
-          find /home/runner -name "*.deb" -ls 2>/dev/null | head -50 || echo "None found anywhere"
-
-          echo ""
-          echo "=== Copying from all found locations ==="
-
-          # Copy from parent directory
-          find "$PARENT_ABS" -maxdepth 1 -name "*.deb" -exec cp -v {} packages/ \; 2>/dev/null || true
-
-          # Copy from work root (in case files ended up there)
-          find "$WORK_ROOT" -maxdepth 3 -name "linux-*.deb" -exec cp -v {} packages/ \; 2>/dev/null || true
-
-          # Copy using relative path as fallback
-          find .. -maxdepth 1 -name "*.deb" -exec cp -v {} packages/ \; 2>/dev/null || true
-
-          echo ""
-          echo "=== Packages directory after copy ==="
-          ls -la packages/ || echo "packages directory is empty or doesn't exist"
-
-          # Count packages
-          PKG_COUNT=$(find packages/ -name "*.deb" 2>/dev/null | wc -l)
-          echo "Total packages in packages/: $PKG_COUNT"
-
-          # Verify we have packages
-          if [ "$PKG_COUNT" -eq 0 ]; then
-            echo ""
-            echo "=== ERROR: No packages found! ==="
-            echo ""
-            echo "Full environment:"
-            env | grep -E "GITHUB|HOME|PWD|PATH" | sort
-            echo ""
-            echo "Current directory tree:"
-            ls -laR . 2>/dev/null | head -100
-            echo ""
-            echo "All files named linux-* anywhere:"
-            find /home/runner -name "linux-*" -ls 2>/dev/null | head -50 || true
-            echo ""
-            echo "Disk usage:"
-            df -h
-            du -sh /home/runner/* 2>/dev/null | sort -h || true
+          # packages/ should already exist and contain .deb files from Create Debian packages step
+          if [ ! -d packages ]; then
+            echo "ERROR: packages/ directory doesn't exist!"
             exit 1
           fi
 
-          set +x  # Disable command tracing
-          echo "✓ Package collection successful ($PKG_COUNT packages)"
+          echo "Contents of packages/:"
+          ls -la packages/
+
+          # Count packages
+          PKG_COUNT=$(find packages/ -name "*.deb" 2>/dev/null | wc -l)
+          echo "Total packages: $PKG_COUNT"
+
+          # Verify we have packages
+          if [ "$PKG_COUNT" -eq 0 ]; then
+            echo "ERROR: No packages found in packages/ directory!"
+            echo ""
+            echo "Debug: checking if packages exist in parent directory..."
+            ls -la ../*.deb 2>/dev/null || echo "No .deb in parent dir either"
+            echo ""
+            echo "Searching all of /home/runner for .deb:"
+            find /home/runner -name "*.deb" -ls 2>/dev/null | head -20 || echo "None found"
+            exit 1
+          fi
+
+          echo "✓ Package collection verified ($PKG_COUNT packages)"
 
       - name: Upload kernel packages
         if: github.event.inputs.build_type != 'quick-test'
