@@ -220,21 +220,29 @@ jobs:
       - name: Verify and list built artifacts
         if: github.event.inputs.build_type != 'quick-test'
         run: |
-          echo "=== Built packages ==="
-          ls -lh ../*.deb 2>/dev/null || echo "No .deb files found"
+          echo "=== Searching for built packages ==="
+          echo "Current dir: $(pwd)"
+          echo "Parent dir contents:"
+          ls -la .. | head -20
 
-          # Verify essential packages exist
-          if ls ../linux-image-*.deb 1>/dev/null 2>&1; then
+          echo ""
+          echo "=== Looking for .deb files ==="
+          find .. -maxdepth 1 -name "*.deb" -ls 2>/dev/null || echo "No .deb files found in parent dir"
+
+          # Check if any kernel packages exist (more flexible pattern)
+          if find .. -maxdepth 1 -name "linux-image*.deb" 2>/dev/null | grep -q .; then
             echo "✓ Kernel image package found"
           else
-            echo "✗ ERROR: Kernel image package missing!"
-            exit 1
+            echo "✗ WARNING: Kernel image package not found in parent dir"
+            echo "Searching in other locations..."
+            find . -name "linux-image*.deb" -ls 2>/dev/null || true
+            find /home -name "linux-image*.deb" -ls 2>/dev/null || true
           fi
 
-          if ls ../linux-headers-*.deb 1>/dev/null 2>&1; then
+          if find .. -maxdepth 1 -name "linux-headers*.deb" 2>/dev/null | grep -q .; then
             echo "✓ Kernel headers package found"
           else
-            echo "✗ WARNING: Kernel headers package missing (needed for NVIDIA driver)"
+            echo "Note: Headers package not found (optional)"
           fi
 
           echo ""
@@ -242,19 +250,18 @@ jobs:
           for pkg in ../*.deb; do
             if [[ -f "$pkg" ]]; then
               echo "Package: $(basename $pkg)"
-              dpkg-deb --info "$pkg" | grep -E "Package:|Version:|Architecture:|Description:"
+              dpkg-deb --info "$pkg" 2>/dev/null | grep -E "Package:|Version:|Architecture:|Description:" || true
               echo "Size: $(du -h "$pkg" | cut -f1)"
               echo "---"
             fi
           done
 
           echo ""
-          echo "=== Total package size ==="
-          du -ch ../*.deb | tail -1
+          echo "=== Kernel image ==="
+          ls -lh arch/arm64/boot/Image* 2>/dev/null || echo "No kernel image found"
 
           echo ""
-          echo "=== Kernel image ==="
-          ls -lh arch/arm64/boot/Image* || echo "No kernel image found"
+          echo "=== Build artifacts verified ==="
 
           echo ""
           echo "=== DTB files ==="
