@@ -274,24 +274,28 @@ jobs:
           echo "Current directory: $(pwd)"
           echo "GITHUB_WORKSPACE: $GITHUB_WORKSPACE"
 
-          # Calculate parent directory using absolute path
-          PARENT_DIR="$(dirname "$GITHUB_WORKSPACE")"
-          echo "Parent directory (absolute): $PARENT_DIR"
-          echo ""
-          echo "Parent directory contents:"
-          ls -la "$PARENT_DIR" | head -30
-
           mkdir -p packages
 
           echo ""
-          echo "=== Copying .deb files ==="
-          # Use absolute path and copy each file explicitly
-          for deb in "$PARENT_DIR"/*.deb; do
-            if [ -f "$deb" ]; then
-              echo "Copying: $deb"
-              cp -v "$deb" packages/
-            fi
-          done
+          echo "=== Finding and copying .deb files using find ==="
+
+          # Use find to locate .deb files in parent directory and copy them
+          # This approach works reliably in GitHub Actions where glob may not
+          cd ..
+          echo "Now in: $(pwd)"
+          echo "Contents:"
+          ls -la | head -30
+
+          echo ""
+          echo "=== Copying packages ==="
+          COPY_COUNT=0
+          while IFS= read -r -d '' debfile; do
+            echo "Found: $debfile"
+            cp -v "$debfile" "$GITHUB_WORKSPACE/packages/"
+            COPY_COUNT=$((COPY_COUNT + 1))
+          done < <(find . -maxdepth 1 -name "*.deb" -print0)
+
+          cd "$GITHUB_WORKSPACE"
 
           echo ""
           echo "=== Packages collected ==="
@@ -299,15 +303,16 @@ jobs:
 
           # Count packages
           PKG_COUNT=$(find packages/ -name "*.deb" | wc -l)
-          echo "Total packages: $PKG_COUNT"
+          echo "Total packages: $PKG_COUNT (copied $COPY_COUNT)"
 
           # Verify we have packages
           if [ "$PKG_COUNT" -eq 0 ]; then
             echo "ERROR: No packages found in packages/ directory!"
             echo ""
-            echo "Searching for .deb files everywhere..."
-            find "$PARENT_DIR" -name "*.deb" -ls 2>/dev/null || true
-            find "$GITHUB_WORKSPACE" -name "*.deb" -ls 2>/dev/null || true
+            echo "Debug: Searching for .deb files..."
+            echo "From workspace parent:"
+            find "$(dirname "$GITHUB_WORKSPACE")" -maxdepth 2 -name "*.deb" -ls 2>/dev/null || true
+            echo "From /home/runner:"
             find /home/runner -name "*.deb" -ls 2>/dev/null | head -20 || true
             exit 1
           fi
